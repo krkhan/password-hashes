@@ -56,7 +56,6 @@ pub use crate::{
 
 use alloc::{string::String, vec::Vec};
 use aws_lc_rs::digest as aws_digest;
-use sha2::{Digest, Sha256};
 
 #[cfg(feature = "simple")]
 use {
@@ -210,69 +209,71 @@ pub fn sha256_crypt(
     let digest_a = sha256crypt_intermediate(password, salt);
 
     // 13.
-    let mut hasher_alt = Sha256::default();
+    let mut ctx_alt = aws_digest::Context::new(&aws_digest::SHA256);
 
     // 14.
     for _ in 0..pw_len {
-        hasher_alt.update(password);
+        ctx_alt.update(password);
     }
 
     // 15.
-    let dp = hasher_alt.finalize();
+    let dp_finished = ctx_alt.finish();
+    let dp = dp_finished.as_ref();
 
     // 16.
     // Create byte sequence P.
-    let p_vec = produce_byte_seq(pw_len, &dp);
+    let p_vec = produce_byte_seq(pw_len, dp);
 
     // 17.
-    hasher_alt = Sha256::default();
+    ctx_alt = aws_digest::Context::new(&aws_digest::SHA256);
 
     // 18.
     // For every character in the password add the entire password.
     for _ in 0..(16 + digest_a[0] as usize) {
-        hasher_alt.update(salt);
+        ctx_alt.update(salt);
     }
 
     // 19.
     // Finish the digest.
-    let ds = hasher_alt.finalize();
+    let ds_finished = ctx_alt.finish();
+    let ds = ds_finished.as_ref();
 
     // 20.
     // Create byte sequence S.
-    let s_vec = produce_byte_seq(salt_len, &ds);
+    let s_vec = produce_byte_seq(salt_len, ds);
 
     let mut digest_c = digest_a;
     // Repeatedly run the collected hash value through SHA256 to burn
     // CPU cycles
     for i in 0..params.rounds {
         // new hasher
-        let mut hasher = Sha256::default();
+        let mut ctx = aws_digest::Context::new(&aws_digest::SHA256);
 
         // Add key or last result
         if (i & 1) != 0 {
-            hasher.update(&p_vec);
+            ctx.update(&p_vec);
         } else {
-            hasher.update(digest_c);
+            ctx.update(&digest_c);
         }
 
         // Add salt for numbers not divisible by 3
         if i % 3 != 0 {
-            hasher.update(&s_vec);
+            ctx.update(&s_vec);
         }
 
         // Add key for numbers not divisible by 7
         if i % 7 != 0 {
-            hasher.update(&p_vec);
+            ctx.update(&p_vec);
         }
 
         // Add key or last result
         if (i & 1) != 0 {
-            hasher.update(digest_c);
+            ctx.update(&digest_c);
         } else {
-            hasher.update(&p_vec);
+            ctx.update(&p_vec);
         }
 
-        digest_c.clone_from_slice(&hasher.finalize());
+        digest_c.clone_from_slice(ctx.finish().as_ref());
     }
 
     digest_c
@@ -615,27 +616,28 @@ fn sha512crypt_intermediate(password: &[u8], salt: &[u8]) -> [u8; BLOCK_SIZE_SHA
 fn sha256crypt_intermediate(password: &[u8], salt: &[u8]) -> [u8; BLOCK_SIZE_SHA256] {
     let pw_len = password.len();
 
-    let mut hasher = Sha256::default();
-    hasher.update(password);
-    hasher.update(salt);
+    let mut ctx = aws_digest::Context::new(&aws_digest::SHA256);
+    ctx.update(password);
+    ctx.update(salt);
 
     // 4.
-    let mut hasher_alt = Sha256::default();
+    let mut ctx_alt = aws_digest::Context::new(&aws_digest::SHA256);
     // 5.
-    hasher_alt.update(password);
+    ctx_alt.update(password);
     // 6.
-    hasher_alt.update(salt);
+    ctx_alt.update(salt);
     // 7.
-    hasher_alt.update(password);
+    ctx_alt.update(password);
     // 8.
-    let digest_b = hasher_alt.finalize();
+    let digest_b_finished = ctx_alt.finish();
+    let digest_b = digest_b_finished.as_ref();
 
     // 9.
     for _ in 0..(pw_len / BLOCK_SIZE_SHA256) {
-        hasher.update(digest_b);
+        ctx.update(digest_b);
     }
     // 10.
-    hasher.update(&digest_b[..(pw_len % BLOCK_SIZE_SHA256)]);
+    ctx.update(&digest_b[..(pw_len % BLOCK_SIZE_SHA256)]);
 
     // 11
     let mut n = pw_len;
@@ -644,13 +646,13 @@ fn sha256crypt_intermediate(password: &[u8], salt: &[u8]) -> [u8; BLOCK_SIZE_SHA
             break;
         }
         if (n & 1) != 0 {
-            hasher.update(digest_b);
+            ctx.update(digest_b);
         } else {
-            hasher.update(password);
+            ctx.update(password);
         }
         n >>= 1;
     }
 
     // 12.
-    hasher.finalize().as_slice().try_into().unwrap()
+    ctx.finish().as_ref().try_into().unwrap()
 }
