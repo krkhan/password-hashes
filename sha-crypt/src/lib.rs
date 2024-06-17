@@ -55,6 +55,7 @@ pub use crate::{
 };
 
 use alloc::{string::String, vec::Vec};
+use aws_lc_rs::digest as aws_digest;
 use sha2::{Digest, Sha256, Sha512};
 
 #[cfg(feature = "simple")]
@@ -568,27 +569,28 @@ fn produce_byte_seq(len: usize, fill_from: &[u8]) -> Vec<u8> {
 fn sha512crypt_intermediate(password: &[u8], salt: &[u8]) -> [u8; BLOCK_SIZE_SHA512] {
     let pw_len = password.len();
 
-    let mut hasher = Sha512::default();
-    hasher.update(password);
-    hasher.update(salt);
+    let mut ctx = aws_digest::Context::new(&aws_digest::SHA512);
+    ctx.update(password);
+    ctx.update(salt);
 
     // 4.
-    let mut hasher_alt = Sha512::default();
+    let mut ctx_alt = aws_digest::Context::new(&aws_digest::SHA512);
     // 5.
-    hasher_alt.update(password);
+    ctx_alt.update(password);
     // 6.
-    hasher_alt.update(salt);
+    ctx_alt.update(salt);
     // 7.
-    hasher_alt.update(password);
+    ctx_alt.update(password);
     // 8.
-    let digest_b = hasher_alt.finalize();
+    let digest_b_finished = ctx_alt.finish();
+    let digest_b = digest_b_finished.as_ref();
 
     // 9.
     for _ in 0..(pw_len / BLOCK_SIZE_SHA512) {
-        hasher.update(digest_b);
+        ctx.update(digest_b);
     }
     // 10.
-    hasher.update(&digest_b[..(pw_len % BLOCK_SIZE_SHA512)]);
+    ctx.update(&digest_b[..(pw_len % BLOCK_SIZE_SHA512)]);
 
     // 11
     let mut n = pw_len;
@@ -597,15 +599,15 @@ fn sha512crypt_intermediate(password: &[u8], salt: &[u8]) -> [u8; BLOCK_SIZE_SHA
             break;
         }
         if (n & 1) != 0 {
-            hasher.update(digest_b);
+            ctx.update(digest_b);
         } else {
-            hasher.update(password);
+            ctx.update(password);
         }
         n >>= 1;
     }
 
     // 12.
-    hasher.finalize().as_slice().try_into().unwrap()
+    ctx.finish().as_ref().try_into().unwrap()
 }
 
 fn sha256crypt_intermediate(password: &[u8], salt: &[u8]) -> [u8; BLOCK_SIZE_SHA256] {
