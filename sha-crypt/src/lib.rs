@@ -56,7 +56,7 @@ pub use crate::{
 
 use alloc::{string::String, vec::Vec};
 use aws_lc_rs::digest as aws_digest;
-use sha2::{Digest, Sha256, Sha512};
+use sha2::{Digest, Sha256};
 
 #[cfg(feature = "simple")]
 use {
@@ -109,69 +109,71 @@ pub fn sha512_crypt(
     let digest_a = sha512crypt_intermediate(password, salt);
 
     // 13.
-    let mut hasher_alt = Sha512::default();
+    let mut ctx_alt = aws_digest::Context::new(&aws_digest::SHA512);
 
     // 14.
     for _ in 0..pw_len {
-        hasher_alt.update(password);
+        ctx_alt.update(password);
     }
 
     // 15.
-    let dp = hasher_alt.finalize();
+    let dp_finished = ctx_alt.finish();
+    let dp = dp_finished.as_ref();
 
     // 16.
     // Create byte sequence P.
-    let p_vec = produce_byte_seq(pw_len, &dp);
+    let p_vec = produce_byte_seq(pw_len, dp);
 
     // 17.
-    hasher_alt = Sha512::default();
+    ctx_alt = aws_digest::Context::new(&aws_digest::SHA512);
 
     // 18.
     // For every character in the password add the entire password.
     for _ in 0..(16 + digest_a[0] as usize) {
-        hasher_alt.update(salt);
+        ctx_alt.update(salt);
     }
 
     // 19.
     // Finish the digest.
-    let ds = hasher_alt.finalize();
+    let ds_finished = ctx_alt.finish();
+    let ds = ds_finished.as_ref();
 
     // 20.
     // Create byte sequence S.
-    let s_vec = produce_byte_seq(salt_len, &ds);
+    let s_vec = produce_byte_seq(salt_len, ds);
 
     let mut digest_c = digest_a;
     // Repeatedly run the collected hash value through SHA512 to burn
     // CPU cycles
     for i in 0..params.rounds {
         // new hasher
-        let mut hasher = Sha512::default();
+        let mut ctx = aws_digest::Context::new(&aws_digest::SHA512);
 
         // Add key or last result
         if (i & 1) != 0 {
-            hasher.update(&p_vec);
+            ctx.update(&p_vec);
         } else {
-            hasher.update(digest_c);
+            ctx.update(&digest_c);
         }
 
         // Add salt for numbers not divisible by 3
         if i % 3 != 0 {
-            hasher.update(&s_vec);
+            ctx.update(&s_vec);
         }
 
         // Add key for numbers not divisible by 7
         if i % 7 != 0 {
-            hasher.update(&p_vec);
+            ctx.update(&p_vec);
         }
 
         // Add key or last result
         if (i & 1) != 0 {
-            hasher.update(digest_c);
+            ctx.update(&digest_c);
         } else {
-            hasher.update(&p_vec);
+            ctx.update(&p_vec);
         }
 
-        digest_c.clone_from_slice(&hasher.finalize());
+        digest_c.clone_from_slice(ctx.finish().as_ref());
     }
 
     digest_c
